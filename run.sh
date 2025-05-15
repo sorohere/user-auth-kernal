@@ -1,5 +1,5 @@
 make clean
-rm -rf /etc/users.db
+sudo rm -rf /etc/users.db
 sudo rmmod passwd_module
 
 make
