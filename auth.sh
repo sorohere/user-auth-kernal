@@ -35,12 +35,26 @@ function authenticate_user() {
     fi
 }
 
+function list_users() {
+    if [ ! -f /etc/users.db ]; then
+        zenity --error --text="No users registered yet!"
+        return
+    fi
+
+    users=$(cut -d':' -f1 /etc/users.db)
+    if [ -z "$users" ]; then
+        zenity --info --title="Registered Users" --text="No users found."
+    else
+        zenity --info --title="Registered Users" --text="$users"
+    fi
+}
+
 function main_menu() {
     choice=$(zenity --list --radiolist \
         --title="User Auth System" \
         --text="Choose an option:" \
         --column="Pick" --column="Option" \
-        TRUE "Register" FALSE "Login" FALSE "Exit")
+        TRUE "Register" FALSE "Login" FALSE "List Users" FALSE "Exit")
 
     case "$choice" in
         Register)
@@ -48,6 +62,9 @@ function main_menu() {
             ;;
         Login)
             authenticate_user
+            ;;
+        "List Users")
+            list_users
             ;;
         Exit)
             exit 0
