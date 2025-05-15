@@ -4,4 +4,4 @@ sudo rmmod passwd_module
 
 make
 sudo insmod passwd_module.ko
-sudo ./auth.sh
+sudo bash ./auth.sh
