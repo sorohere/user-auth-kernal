@@ -8,12 +8,41 @@ function hash_password() {
 
 function register_user() {
     user=$(zenity --entry --title="Register" --text="Enter Username:")
-    pass=$(zenity --password --title="Register")
-    hash=$(hash_password "$user:$pass")
+    
+    # Early checks for username
+    if [ -z "$user" ]; then
+        zenity --error --text="Username cannot be empty!"
+        return
+    fi
 
+    if [ ${#user} -lt 4 ]; then
+        zenity --error --text="Username must be at least 4 characters long!"
+        return
+    fi
+
+    if grep -q "^$user:" /etc/users.db 2>/dev/null; then
+        zenity --error --text="Username already exists!"
+        return
+    fi
+
+    # If username is OK, continue to password
+    pass=$(zenity --password --title="Register")
+
+    if [ -z "$pass" ]; then
+        zenity --error --text="Password cannot be empty!"
+        return
+    fi
+
+    if [ ${#pass} -lt 7 ]; then
+        zenity --error --text="Password must be at least 7 characters long!"
+        return
+    fi
+
+    hash=$(hash_password "$user:$pass")
     echo -n "$user:$hash" > "$DEVICE"
     zenity --info --text="User Registered!"
 }
+
 
 function authenticate_user() {
     user=$(zenity --entry --title="Login" --text="Enter Username:")
@@ -49,12 +78,43 @@ function list_users() {
     fi
 }
 
+function delete_user() {
+    user=$(zenity --entry --title="Delete User" --text="Enter Username:")
+    pass=$(zenity --password --title="Delete User")
+
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+        zenity --error --text="Username and password cannot be empty!"
+        return
+    fi
+
+    entered_hash=$(hash_password "$user:$pass")
+
+    user_info=$(grep "^$user:" /etc/users.db 2>/dev/null)
+    if [ -z "$user_info" ]; then
+        zenity --error --text="User not found!"
+        return
+    fi
+
+    stored_hash=$(echo "$user_info" | cut -d':' -f2)
+
+    if [ "$entered_hash" != "$stored_hash" ]; then
+        zenity --error --text="Authentication Failed!"
+        return
+    fi
+
+    # Authentication successful — delete the user line
+    sudo sed -i "/^$user:/d" /etc/users.db
+
+    zenity --info --text="User '$user' deleted successfully!"
+}
+
+
 function main_menu() {
     choice=$(zenity --list --radiolist \
         --title="User Auth System" \
         --text="Choose an option:" \
         --column="Pick" --column="Option" \
-        TRUE "Register" FALSE "Login" FALSE "List Users" FALSE "Exit")
+        TRUE "Register" FALSE "Login" FALSE "Delete User" FALSE "List Users" FALSE "Exit")
 
     case "$choice" in
         Register)
@@ -62,6 +122,9 @@ function main_menu() {
             ;;
         Login)
             authenticate_user
+            ;;
+        "Delete User")
+            delete_user
             ;;
         "List Users")
             list_users
@@ -71,6 +134,7 @@ function main_menu() {
             ;;
     esac
 }
+
 
 # Ensure device file exists
 if [ ! -e "$DEVICE" ]; then
