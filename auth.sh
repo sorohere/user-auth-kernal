@@ -80,10 +80,17 @@ function list_users() {
 
 function delete_user() {
     user=$(zenity --entry --title="Delete User" --text="Enter Username:")
+
+    # Early check for empty username
+    if [ -z "$user" ]; then
+        zenity --error --text="Username cannot be empty!"
+        return
+    fi
+
     pass=$(zenity --password --title="Delete User")
 
-    if [ -z "$user" ] || [ -z "$pass" ]; then
-        zenity --error --text="Username and password cannot be empty!"
+    if [ -z "$pass" ]; then
+        zenity --error --text="Password cannot be empty!"
         return
     fi
 
@@ -108,13 +115,60 @@ function delete_user() {
     zenity --info --text="User '$user' deleted successfully!"
 }
 
+function change_password() {
+    user=$(zenity --entry --title="Change Password" --text="Enter Username:")
+
+    if [ -z "$user" ]; then
+        zenity --error --text="Username cannot be empty!"
+        return
+    fi
+
+    pass=$(zenity --password --title="Change Password" --text="Enter Current Password:")
+    if [ -z "$pass" ]; then
+        zenity --error --text="Password cannot be empty!"
+        return
+    fi
+
+    entered_hash=$(hash_password "$user:$pass")
+    user_info=$(grep "^$user:" /etc/users.db 2>/dev/null)
+    if [ -z "$user_info" ]; then
+        zenity --error --text="User not found!"
+        return
+    fi
+
+    stored_hash=$(echo "$user_info" | cut -d':' -f2)
+    if [ "$entered_hash" != "$stored_hash" ]; then
+        zenity --error --text="Authentication failed!"
+        return
+    fi
+
+    # Prompt new password
+    new_pass=$(zenity --password --title="Change Password" --text="Enter New Password:")
+    if [ -z "$new_pass" ]; then
+        zenity --error --text="New password cannot be empty!"
+        return
+    fi
+
+    if [ ${#new_pass} -lt 7 ]; then
+        zenity --error --text="New password must be at least 7 characters long!"
+        return
+    fi
+
+    new_hash=$(hash_password "$user:$new_pass")
+
+    # Replace password hash in file
+    sudo sed -i "s/^$user:.*/$user:$new_hash/" /etc/users.db
+    zenity --info --text="Password changed successfully!"
+}
+
+
 
 function main_menu() {
     choice=$(zenity --list --radiolist \
         --title="User Auth System" \
         --text="Choose an option:" \
         --column="Pick" --column="Option" \
-        TRUE "Register" FALSE "Login" FALSE "Delete User" FALSE "List Users" FALSE "Exit")
+        TRUE "Register" FALSE "Login" FALSE "Delete User" FALSE "Change Password" FALSE "List Users" FALSE "Exit")
 
     case "$choice" in
         Register)
@@ -125,6 +179,9 @@ function main_menu() {
             ;;
         "Delete User")
             delete_user
+            ;;
+        "Change Password")
+            change_password
             ;;
         "List Users")
             list_users
