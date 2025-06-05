@@ -1,4 +1,3 @@
-// passwd_module.c
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
@@ -11,7 +10,7 @@
 #define USER_DB_FILE "/etc/users.db"
 
 static int device_open = 0;
-static char *stored_data;
+
 static ssize_t device_read(struct file *, char *, size_t, loff_t *);
 static ssize_t device_write(struct file *, const char *, size_t, loff_t *);
 static int device_open_fn(struct inode *, struct file *);
@@ -37,8 +36,6 @@ int init_module(void) {
 void cleanup_module(void) {
     unregister_chrdev(91, DEVICE_NAME);
     printk(KERN_INFO "Unloaded passwd module\n");
-    if (stored_data)
-        kfree(stored_data);
 }
 
 static int device_open_fn(struct inode *inode, struct file *file) {
@@ -55,59 +52,75 @@ static int device_release_fn(struct inode *inode, struct file *file) {
 }
 
 static ssize_t device_read(struct file *filp, char *buffer, size_t length, loff_t *offset) {
-    if (stored_data == NULL) {
-        printk(KERN_ALERT "stored_data is NULL\n");
-        return -EFAULT;
-    }
+    struct file *user_file;
+    loff_t pos = 0;
+    ssize_t bytes_read;
+    char *kernel_buf;
 
-    size_t len = strlen(stored_data);
-    if (length < len) {
-        printk(KERN_ALERT "Buffer size is too small for reading stored data\n");
+    kernel_buf = kmalloc(BUF_LEN, GFP_KERNEL);
+    if (!kernel_buf)
         return -ENOMEM;
+
+    user_file = filp_open(USER_DB_FILE, O_RDONLY, 0);
+    if (IS_ERR(user_file)) {
+        kfree(kernel_buf);
+        return PTR_ERR(user_file);
     }
 
-    if (copy_to_user(buffer, stored_data, len)) {
-        printk(KERN_ALERT "Failed to copy data to user\n");
+    bytes_read = kernel_read(user_file, kernel_buf, BUF_LEN - 1, &pos);
+    if (bytes_read < 0) {
+        filp_close(user_file, NULL);
+        kfree(kernel_buf);
+        return bytes_read;
+    }
+
+    kernel_buf[bytes_read] = '\0';
+    filp_close(user_file, NULL);
+
+    if (copy_to_user(buffer, kernel_buf, bytes_read)) {
+        kfree(kernel_buf);
         return -EFAULT;
     }
 
-    return len;
+    kfree(kernel_buf);
+    return bytes_read;
 }
 
 static ssize_t device_write(struct file *filp, const char *buff, size_t len, loff_t *off) {
     struct file *user_file;
-    loff_t pos = 0;
     char *user_data;
-    int ret = 0;
+    int ret;
 
-    if (len < BUF_LEN) {
-        user_data = kmalloc(len + 1, GFP_KERNEL);
-        if (!user_data)
-            return -ENOMEM;
+    user_data = kmalloc(len + 2, GFP_KERNEL); // extra byte for newline
+    if (!user_data)
+        return -ENOMEM;
 
-        if (copy_from_user(user_data, buff, len)) {
-            printk(KERN_ALERT "Failed to copy data from user\n");
-            kfree(user_data);
-            return -EFAULT;
-        }
-
-        user_data[len] = '\0';
-
-        // Open user DB file to write
-        user_file = filp_open(USER_DB_FILE, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (IS_ERR(user_file)) {
-            ret = PTR_ERR(user_file);
-            printk(KERN_ALERT "Failed to open file: %d\n", ret);
-        } else {
-            kernel_write(user_file, user_data, len, &pos);
-            filp_close(user_file, NULL);
-        }
-
+    if (copy_from_user(user_data, buff, len)) {
+        printk(KERN_ALERT "Failed to copy data from user\n");
         kfree(user_data);
+        return -EFAULT;
     }
 
+    // Ensure null-terminated and newline-appended string
+    user_data[len] = '\n';
+    user_data[len + 1] = '\0';
+
+    user_file = filp_open(USER_DB_FILE, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (IS_ERR(user_file)) {
+        ret = PTR_ERR(user_file);
+        printk(KERN_ALERT "Failed to open file: %d\n", ret);
+        kfree(user_data);
+        return ret;
+    }
+
+    ret = kernel_write(user_file, user_data, len + 1, &user_file->f_pos);
+    if (ret < 0) {
+        printk(KERN_ALERT "kernel_write failed: %d\n", ret);
+    }
+
+    filp_close(user_file, NULL);
+    kfree(user_data);
     return len;
 }
 
 MODULE_LICENSE("GPL");
-
